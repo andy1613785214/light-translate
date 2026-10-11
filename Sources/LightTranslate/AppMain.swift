@@ -105,7 +105,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             model.isBusy = true
             openPanel()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [self] in
-                guard panel.frame.width == 148, panel.frame.height == 44 else { Foundation.exit(1) }
+                guard panel.frame.width == 148, panel.frame.height == 44, !panel.hidesOnDeactivate else { Foundation.exit(1) }
                 print("PASS: loading is a 148 × 44 toast")
                 model.inputText = "The committee reached a unanimous decision."
                 model.resultSource = model.inputText
@@ -217,7 +217,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         setCompactState(model.isBusy)
         panel.acceptsInput = activate && !model.isBusy
         if !activate && panel.isKeyWindow { panel.resignKey() }
-        if !model.isPinned || !panel.isVisible {
+        if model.isBusy || !model.isPinned || !panel.isVisible {
             let mouse = NSEvent.mouseLocation
             let visible = (NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) } ?? NSScreen.main)?.visibleFrame
                 ?? NSRect(x: 0, y: 0, width: 1280, height: 800)
@@ -239,10 +239,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             expandedSize = frame.size
             panel.minSize = NSSize(width: 132, height: 44)
             panel.acceptsInput = false
+            panel.hidesOnDeactivate = false
             if panel.isKeyWindow { panel.resignKey() }
         } else {
             panel.minSize = NSSize(width: 320, height: 180)
             panel.acceptsInput = true
+            panel.hidesOnDeactivate = !model.isPinned
         }
         let size = busy ? NSSize(width: 148, height: 44) : expandedSize
         frame.origin = NSPoint(x: frame.maxX - size.width, y: frame.maxY - size.height)

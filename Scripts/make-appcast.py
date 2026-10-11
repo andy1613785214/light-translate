@@ -9,7 +9,9 @@ version, build = info['CFBundleShortVersionString'], info['CFBundleVersion']
 project = info['LTProjectURL']
 archive = output/f'LightTranslate-{version}-arm64.zip'
 account = 'com.local.LightTranslate.sparkle'
-tools = root/'.build/artifacts/translating/Sparkle/bin'
+tool_paths = list((root/'.build/artifacts').glob('*/Sparkle/bin'))
+if len(tool_paths) != 1: raise SystemExit('Expected one resolved Sparkle artifact.')
+tools = tool_paths[0]
 
 def run(*args):
     return subprocess.check_output([str(tools/'sign_update'), '--account', account, *map(str, args)], text=True).strip()

@@ -18,7 +18,9 @@ cp Resources/Info.plist "$STAGED_APP/Contents/Info.plist"
 cp -R .build/release/LightTranslate_TranslationCore.bundle "$STAGED_APP/Contents/Resources/"
 cp .build/release-assets/AppIcon.icns "$STAGED_APP/Contents/Resources/"
 ditto .build/release/Sparkle.framework "$STAGED_APP/Contents/Frameworks/Sparkle.framework"
-cp .build/artifacts/translating/Sparkle/LICENSE "$STAGED_APP/Contents/Resources/Sparkle-LICENSE.txt"
+SPARKLE_LICENSES=("$PWD"/.build/artifacts/*/Sparkle/LICENSE(N))
+[[ ${#SPARKLE_LICENSES[@]} -eq 1 ]] || { print "Expected one resolved Sparkle artifact."; exit 1; }
+cp "$SPARKLE_LICENSES[1]" "$STAGED_APP/Contents/Resources/Sparkle-LICENSE.txt"
 IDENTITY="${SIGNING_IDENTITY:--}"
 CODESIGN_FLAGS=()
 if [[ "$IDENTITY" != '-' ]]; then

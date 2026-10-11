@@ -5,7 +5,7 @@
 ## 发新版
 
 1. 修改 `Resources/Info.plist` 的 `CFBundleShortVersionString` 与递增 `CFBundleVersion`，同步发布说明。
-2. 执行 `Scripts/test.sh` 和 `Scripts/package-release.sh`。
+2. 执行 `Scripts/test.sh` 和 `Scripts/package-release.sh`；在本机运行 `Scripts/check-ui.sh` 检查原生浮窗布局。
 3. 审查源码并提交至 main；执行 `Scripts/publish-release.sh` 创建 GitHub Release。`gh` 必须已登录仓库维护者账户。
 
 打包脚本生成 DMG、ZIP、签名 `appcast.xml`、SHA-256 清单及公开版本信息。公开更新地址固定为 GitHub 最新 Release 的 `appcast.xml`；包链接指向对应版本 tag。

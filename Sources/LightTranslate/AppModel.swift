@@ -10,7 +10,12 @@ final class AppModel: ObservableObject {
     @Published var resultSource = ""
     @Published var error: String?
     @Published var status = "划选句子并按快捷键，或直接粘贴文字。"
-    @Published var isBusy = false
+    @Published var isBusy = false {
+        didSet {
+            if oldValue != isBusy { onCompactStateChange?(isBusy) }
+        }
+    }
+    @Published var presentationID = UUID()
     @Published var isPinned = false
     @Published var elapsed: Double?
     @Published var connectionStatus = ""
@@ -20,7 +25,7 @@ final class AppModel: ObservableObject {
     var dismissPanel: (() -> Void)?
     var onPinChange: ((Bool) -> Void)?
     var onInputCaptured: (() -> Void)?
-    var onContentHeightChange: ((CGFloat) -> Void)?
+    var onPanelLayoutChange: ((PanelLayout) -> Void)?
     var checkForUpdates: (() -> Void)?
     var onCompactStateChange: ((Bool) -> Void)?
     private var task: Task<Void, Never>?
@@ -49,7 +54,8 @@ final class AppModel: ObservableObject {
         start { text }
     }
     private func start(force: Bool = false, isSelection: Bool = false, initialStatus: String = "正在准备翻译…", input: @escaping () async throws -> String) {
-        cancel()
+        cancel(endBusyState: false)
+        presentationID = UUID()
         if isTesting && settings.mode == .local { runtime.stop() }
         testTask?.cancel(); testID = UUID(); isTesting = false
         idleTask?.cancel()
@@ -116,10 +122,10 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func cancel() {
+    func cancel(endBusyState: Bool = true) {
         requestID = UUID(); task?.cancel(); task = nil
         if isBusy && settings.mode == .local { runtime.stop() }
-        isBusy = false
+        if endBusyState { isBusy = false }
     }
     func setMode(_ mode: ProviderMode) {
         guard settings.mode != mode else { return }

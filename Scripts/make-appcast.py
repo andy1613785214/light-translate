@@ -31,7 +31,7 @@ ET.SubElement(item, 'pubDate').text = email.utils.format_datetime(datetime.datet
 ET.SubElement(item, f'{{{ns}}}version').text = build
 ET.SubElement(item, f'{{{ns}}}shortVersionString').text = version
 ET.SubElement(item, f'{{{ns}}}minimumSystemVersion').text = info['LSMinimumSystemVersion']
-ET.SubElement(item, 'description').text = '原生液态玻璃界面；等待时仅显示一行小窗；译文返回后展开。'
+ET.SubElement(item, 'description').text = '修复翻译浮窗裁切、内容覆盖和尺寸异常；快速返回正确展开，长文在窗口内滚动。'
 ET.SubElement(item, 'enclosure', {'url': f'{project}/releases/download/v{version}/{archive.name}',
     'length': str(archive.stat().st_size), 'type': 'application/octet-stream', f'{{{ns}}}edSignature': signature})
 ET.indent(rss, space='  ')

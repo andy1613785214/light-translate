@@ -2,9 +2,32 @@ import AppKit
 import SwiftUI
 import TranslationCore
 
-private struct PanelContentHeightKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+struct PanelLayout: Equatable {
+    var contentHeight: CGFloat = 0
+    var regions: [String: CGRect] = [:]
+    var idealHeight: CGFloat {
+        contentHeight + (regions["header"]?.height ?? 36) + (regions["footer"]?.height ?? 25)
+    }
+}
+
+private struct PanelLayoutKey: PreferenceKey {
+    static let defaultValue = PanelLayout()
+    static func reduce(value: inout PanelLayout, nextValue: () -> PanelLayout) {
+        let next = nextValue()
+        value.contentHeight = max(value.contentHeight, next.contentHeight)
+        value.regions.merge(next.regions) { _, new in new }
+    }
+}
+
+private extension View {
+    func panelRegion(_ name: String) -> some View {
+        background {
+            GeometryReader { geometry in
+                Color.clear.preference(key: PanelLayoutKey.self,
+                    value: PanelLayout(regions: [name: geometry.frame(in: .named("translation-panel"))]))
+            }
+        }
+    }
 }
 
 struct TranslationView: View {
@@ -23,8 +46,8 @@ struct TranslationView: View {
             } else {
                 expandedBody
             }
-        }.onChange(of: model.isBusy, initial: true) { _, busy in model.onCompactStateChange?(busy) }
-            .onChange(of: model.result?.translation) { _, _ in
+        }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .onChange(of: model.presentationID) { _, _ in
                 expanded.removeAll(); copied = false; sourceExpanded = false; vocabularyExpanded = false
             }
     }
@@ -60,6 +83,7 @@ struct TranslationView: View {
                     .help("关闭（Esc）").accessibilityLabel("关闭浮窗")
             }.font(.system(size: 12)).buttonStyle(.plain)
                 .padding(.horizontal, 12).padding(.vertical, 10)
+                .layoutPriority(1).panelRegion("header")
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                     if model.result != nil && (!WordSelection.isSingleEnglishWord(model.resultSource) || sourceExpanded) {
@@ -142,7 +166,9 @@ struct TranslationView: View {
                                     .accessibilityLabel(copied ? "已复制" : "复制译文")
                             }
                             Text(result.translation).font(.system(size: 15)).lineSpacing(3)
+                                .fixedSize(horizontal: false, vertical: true)
                                 .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                                .panelRegion("translation")
                         }.padding(.vertical, 6)
                         if !result.vocabulary.isEmpty {
                             DisclosureGroup(isExpanded: $vocabularyExpanded) {
@@ -157,7 +183,7 @@ struct TranslationView: View {
                                 HStack {
                                     Text("词汇 · \(result.vocabulary.count)").font(.caption.weight(.semibold))
                                     Spacer()
-                                }
+                                }.panelRegion("vocabulary-toggle")
                             }.tint(.teal)
                         }
                         }
@@ -171,10 +197,13 @@ struct TranslationView: View {
                     }
                 }.padding(12).background {
                     GeometryReader { geometry in
-                        Color.clear.preference(key: PanelContentHeightKey.self, value: geometry.size.height)
+                        Color.clear.preference(key: PanelLayoutKey.self, value: PanelLayout(contentHeight: geometry.size.height))
                     }
                 }
             }
+            .id(model.presentationID)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .clipped().panelRegion("scroll")
             HStack(spacing: 5) {
                 Text(settings.mode == .cloud ? "云端 API" : "本机")
                     .help(settings.mode == .cloud ? "文字将发送到你配置的 API" : "文字仅发送到本机")
@@ -185,10 +214,12 @@ struct TranslationView: View {
                 if let seconds = model.elapsed { Text(String(format: "%.1fs", seconds)) }
             }.font(.system(size: 10)).foregroundStyle(.tertiary)
                 .padding(.horizontal, 16).padding(.bottom, 12)
-        }.frame(minWidth: 320, minHeight: 180)
+                .layoutPriority(1).panelRegion("footer")
+        }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .coordinateSpace(name: "translation-panel")
             .clipShape(RoundedRectangle(cornerRadius: 22))
-            .onPreferenceChange(PanelContentHeightKey.self) { height in
-                if height > 0 { model.onContentHeightChange?(height + 65) }
+            .onPreferenceChange(PanelLayoutKey.self) { layout in
+                if layout.contentHeight > 0 { model.onPanelLayoutChange?(layout) }
             }
     }
 }

@@ -30,9 +30,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private let releaseManager = ReleaseManager()
     private var compactState = false
     private var expandedSize = NSSize(width: 360, height: 240)
+    private var pendingPanelFit: DispatchWorkItem?
+    private var latestPanelLayout = PanelLayout()
 
     override init() {
-        let fixture = ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("--render-") || $0.hasPrefix("--smoke-") }) ||
+        let fixture = ProcessInfo.processInfo.arguments.contains("--preview-ui") ||
+            ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("--render-") || $0.hasPrefix("--smoke-") }) ||
             Bundle.main.object(forInfoDictionaryKey: "LightTranslateUIPreview") as? Bool == true
         settings = SettingsStore(defaults: fixture ? UserDefaults(suiteName: "com.local.LightTranslate.UIFixture")! : .standard)
         super.init()
@@ -55,7 +58,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             self.panel.makeKeyAndOrderFront(nil)
         }
         model.onPinChange = { [weak self] pinned in self?.panel.hidesOnDeactivate = !pinned }
-        model.onContentHeightChange = { [weak self] height in self?.fitPanelHeight(height) }
+        model.onPanelLayoutChange = { [weak self] layout in
+            self?.latestPanelLayout = layout
+            self?.schedulePanelFit(layout.idealHeight)
+        }
         model.checkForUpdates = { [weak self] in self?.releaseManager.checkForUpdates(nil) }
         model.onCompactStateChange = { [weak self] busy in self?.setCompactState(busy) }
         hotKey.onPress = { [weak self] in
@@ -122,6 +128,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
             return
         }
+        if ProcessInfo.processInfo.arguments.contains("--smoke-layout") {
+            Task { await checkPanelLayout() }
+            return
+        }
         if !UserDefaults.standard.bool(forKey: "hasLaunched") {
             UserDefaults.standard.set(true, forKey: "hasLaunched")
             openSettings()
@@ -134,6 +144,101 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 let visible = panel.screen?.visibleFrame ?? .zero
                 print("SMOKE: delegate launched; panel=\(panel != nil); hostingView=\(panel.contentView != nil); statusItem=\(statusItem != nil); windows=\(NSApp.windows.count); bundledIPA=\(PronunciationLexicon.shared.entryCount); compactFrame=\(panel.frame); rightInset=\(visible.maxX - panel.frame.maxX); topInset=\(visible.maxY - panel.frame.maxY)")
                 NSApp.terminate(nil)
+            }
+        }
+    }
+    private func checkPanelLayout() async {
+        func settle() async { try? await Task.sleep(for: .milliseconds(350)) }
+        func showResult(source: String, value: TranslationResult?) {
+            model.presentationID = UUID()
+            model.error = nil
+            model.inputText = source; model.resultSource = source; model.result = value
+            model.isBusy = false
+        }
+        model.isBusy = true; openPanel()
+        await settle()
+        guard panel.frame.size == NSSize(width: 148, height: 44) else { Foundation.exit(1) }
+        captureProbe("loading")
+        showResult(source: UIPreviewFixture.longSource, value: UIPreviewFixture.longResult)
+        await settle()
+        checkExpandedLayout("sentence", requireTranslation: true)
+        guard let toggle = latestPanelLayout.regions["vocabulary-toggle"] else { Foundation.exit(1) }
+        let collapsedHeight = panel.frame.height
+        clickPanel(at: NSPoint(x: max(12, toggle.minX - 10), y: panel.frame.height - toggle.midY))
+        await settle()
+        checkExpandedLayout("vocabulary-expanded", requireTranslation: true)
+        guard panel.frame.height > collapsedHeight else { Foundation.exit(1) }
+        if let toggle = latestPanelLayout.regions["vocabulary-toggle"] {
+            clickPanel(at: NSPoint(x: max(12, toggle.minX - 10), y: panel.frame.height - toggle.midY))
+        }
+        await settle()
+        checkExpandedLayout("vocabulary-collapsed", requireTranslation: true)
+        guard abs(panel.frame.height - collapsedHeight) < 2 else { Foundation.exit(1) }
+        // Cache hits can complete without another SwiftUI render between these states.
+        for _ in 0..<5 {
+            model.isBusy = true; presentPanel(activate: false)
+            showResult(source: UIPreviewFixture.longSource, value: UIPreviewFixture.longResult)
+            guard panel.frame.width >= 320, !compactState else { Foundation.exit(1) }
+        }
+        await settle()
+        checkExpandedLayout("immediate-result", requireTranslation: true)
+        let visible = panel.screen?.visibleFrame ?? .zero
+        var outside = panel.frame
+        outside.origin.y = visible.maxY - 18
+        panel.setFrame(outside, display: true)
+        fitPanelHeight(latestPanelLayout.idealHeight)
+        await settle()
+        checkExpandedLayout("screen-edge", requireTranslation: true)
+        model.isBusy = true; presentPanel(activate: false)
+        showResult(source: UIPreviewFixture.longSource, value: UIPreviewFixture.overflowResult)
+        await settle()
+        checkExpandedLayout("long-result", requireTranslation: true)
+        guard panel.frame.height <= 520, latestPanelLayout.contentHeight > panel.frame.height else { Foundation.exit(1) }
+        model.inputText = ""
+        model.translateText(); model.translateText()
+        guard model.isBusy, compactState else { Foundation.exit(1) }
+        await settle()
+        guard !model.isBusy, model.error != nil else { Foundation.exit(1) }
+        checkExpandedLayout("cancel-and-error", requireTranslation: false)
+        model.isBusy = true; presentPanel(activate: false)
+        showResult(source: "unanimous", value: UIPreviewFixture.result)
+        await settle()
+        checkExpandedLayout("single-word", requireTranslation: false)
+        guard latestPanelLayout.regions["vocabulary-toggle"] == nil else { Foundation.exit(1) }
+        print("PASS: 9 native layout scenarios, including immediate results, screen bounds, vocabulary resizing, long text, cancellation errors and single-word details")
+        NSApp.terminate(nil)
+    }
+    private func checkExpandedLayout(_ phase: String, requireTranslation: Bool) {
+        let bounds = NSRect(origin: .zero, size: panel.frame.size)
+        let regions = latestPanelLayout.regions
+        guard let header = regions["header"], let footer = regions["footer"], let scroll = regions["scroll"],
+              panel.frame.width >= 320, panel.frame.height >= 180,
+              bounds.insetBy(dx: -1, dy: -1).contains(header), bounds.insetBy(dx: -1, dy: -1).contains(footer),
+              header.maxY <= scroll.minY + 1, scroll.maxY <= footer.minY + 1,
+              abs(constrainedPanelFrame(panel.frame).minY - panel.frame.minY) < 1 else {
+            print("FAIL: \(phase) window or content clipped; frame=\(panel.frame), regions=\(regions)"); Foundation.exit(1)
+        }
+        if requireTranslation {
+            guard let text = regions["translation"], text.height >= 19,
+                  text.minY >= scroll.minY, text.minY < scroll.maxY else { Foundation.exit(1) }
+        }
+        captureProbe(phase)
+    }
+    private func captureProbe(_ phase: String) {
+        print("LAYOUT \(phase): panel=\(panel.frame), idealHeight=\(latestPanelLayout.idealHeight)")
+        if let directory = ProcessInfo.processInfo.environment["LT_UI_CAPTURE_DIR"] {
+            let capture = Process()
+            capture.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+            capture.arguments = ["-x", "-o", "-l", String(panel.windowNumber), "\(directory)/\(phase).png"]
+            do { try capture.run(); capture.waitUntilExit() }
+            catch { print("Window capture unavailable") }
+        }
+    }
+    private func clickPanel(at point: NSPoint) {
+        for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+            if let event = NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: 0,
+                windowNumber: panel.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1) {
+                panel.sendEvent(event)
             }
         }
     }
@@ -233,6 +338,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func hidePanel() { model.cancel(); panel.orderOut(nil) }
     private func setCompactState(_ busy: Bool) {
         guard busy != compactState else { return }
+        pendingPanelFit?.cancel()
         compactState = busy
         var frame = panel.frame
         if busy {
@@ -249,21 +355,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let size = busy ? NSSize(width: 148, height: 44) : expandedSize
         frame.origin = NSPoint(x: frame.maxX - size.width, y: frame.maxY - size.height)
         frame.size = size
-        panel.setFrame(frame, display: true)
+        panel.setFrame(constrainedPanelFrame(frame), display: true)
         if !busy, panel.isVisible, model.result != nil || model.error != nil {
             NSApp.activate(ignoringOtherApps: true)
             panel.makeKeyAndOrderFront(nil)
         }
+    }
+    private func schedulePanelFit(_ height: CGFloat) {
+        pendingPanelFit?.cancel()
+        guard !model.isBusy else { return }
+        let work = DispatchWorkItem { [weak self] in self?.fitPanelHeight(height) }
+        pendingPanelFit = work
+        // Do not resize an AppKit window from inside a SwiftUI layout pass.
+        DispatchQueue.main.async(execute: work)
+    }
+    private func constrainedPanelFrame(_ proposed: NSRect) -> NSRect {
+        let visible = panel.screen?.visibleFrame ?? NSScreen.main?.visibleFrame
+            ?? NSRect(x: 0, y: 0, width: 1280, height: 800)
+        var frame = proposed
+        frame.size.width = min(frame.width, visible.width - 24)
+        frame.size.height = min(frame.height, visible.height - 24)
+        frame.origin.x = max(visible.minX + 12, min(frame.minX, visible.maxX - frame.width - 12))
+        frame.origin.y = max(visible.minY + 12, min(frame.minY, visible.maxY - frame.height - 12))
+        return frame
     }
     private func fitPanelHeight(_ contentHeight: CGFloat) {
         guard !model.isBusy, !userResizedPanel, !panel.inLiveResize else { return }
         let visible = panel.screen?.visibleFrame ?? NSScreen.main?.visibleFrame
             ?? NSRect(x: 0, y: 0, width: 1280, height: 800)
         let height = min(max(180, ceil(contentHeight)), min(520, visible.height - 24))
-        guard abs(panel.frame.height - height) > 1 else { return }
         var frame = panel.frame
         frame.origin.y = max(visible.minY + 12, min(frame.maxY, visible.maxY - 12) - height)
         frame.size.height = height
+        frame = constrainedPanelFrame(frame)
+        guard frame != panel.frame else { return }
         panel.setFrame(frame, display: true)
     }
     func windowDidEndLiveResize(_ notification: Notification) {
@@ -315,6 +440,10 @@ struct LightTranslateMain {
     @MainActor
     static func main() {
         let application = NSApplication.shared
+        if ProcessInfo.processInfo.arguments.contains("--check-permission") {
+            print(SelectionService.hasPermission ? "辅助功能权限有效" : "辅助功能权限需要重新授权")
+            return
+        }
         if ProcessInfo.processInfo.arguments.contains("--check-hotkey") {
             let manager = HotKeyManager()
             do {

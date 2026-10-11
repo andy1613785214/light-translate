@@ -74,6 +74,7 @@ final class AppModel: ObservableObject {
                 captured = true
                 self.onInputCaptured?()
                 let request = try TranslationRequest(text: text, direction: direction)
+                self.inputText = request.text
                 let key = CacheKey(request: request, provider: mode.rawValue, endpoint: mode == .cloud ? endpoint : "local",
                                    model: mode == .cloud ? "\(cloudService.rawValue):\(cloudModel):\(vocabularyModel)" : localModel)
                 let value: TranslationResult

@@ -1,0 +1,26 @@
+name: Build and checks
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  macOS:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - name: Core and HTTP checks
+        run: Scripts/test.sh
+      - name: Build Release application
+        run: Scripts/build-app.sh
+      - name: Audit publishable content
+        run: python3 Scripts/audit-release.py --source --bundle dist/轻译.app
+      - name: Preserve build artifact
+        run: ditto -c -k --sequesterRsrc --keepParent dist/轻译.app dist/LightTranslate-ci.zip
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LightTranslate-build
+          path: dist/LightTranslate-ci.zip

@@ -1,0 +1,8 @@
+General American English IPA data from open-dict-data/ipa-dict.
+Source: https://raw.githubusercontent.com/open-dict-data/ipa-dict/master/data/en_US.txt
+Upstream SHA-256: 2af6f154a5c363275f052d1f85acedef38ed185ca9745aa4314be77f6b70de67
+Imported: 2026-09-30
+Changes: lowercase ASCII keys, sorted tab-separated entries; non-ASCII headwords omitted.
+Derived from cmudict-ipa (MIT), with stress markers generated using syllabify, and the CMU Pronouncing Dictionary.
+The accompanying upstream license notices are retained in this resource bundle.
+This wordlist may contain errors; alternative readings are shown together without contextual disambiguation.
